@@ -15,5 +15,5 @@ jobs:
       - name: Run AI Commit Summary
         uses: your-username/ai-commit-summary-action@v1
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.SGITHUB_TOKEN }}
           openai_api_key: ${{ secrets.OPENAI_API_KEY }}
