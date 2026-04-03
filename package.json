@@ -1,0 +1,10 @@
+{
+  "name": "ai-commit-summary-action",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "@actions/core": "^1.10.0",
+    "@actions/github": "^6.0.0",
+    "axios": "^1.6.0"
+  }
+}
