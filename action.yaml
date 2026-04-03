@@ -1,0 +1,15 @@
+name: "AI Commit Summary"
+description: "Generate commit-by-commit summaries using OpenAI"
+
+inputs:
+  github_token:
+    required: true
+  openai_api_key:
+    required: true
+  model:
+    required: false
+    default: "gpt-4o-mini"
+
+runs:
+  using: "node20"
+  main: "index.js"
