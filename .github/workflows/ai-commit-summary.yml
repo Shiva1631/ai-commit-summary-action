@@ -4,16 +4,20 @@ on:
   pull_request:
     types: [opened, synchronize]
 
+permissions:
+  pull-requests: read
+  issues: write
+  contents: read
+
 jobs:
   summarize:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Run AI Commit Summary
-        uses: your-username/ai-commit-summary-action@v1
+        uses: shiva1631/ai-commit-summary-action@test3
         with:
-          github_token: ${{ secrets.SGITHUB_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           openai_api_key: ${{ secrets.OPENAI_API_KEY }}
