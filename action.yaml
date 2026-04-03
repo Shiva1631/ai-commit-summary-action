@@ -2,9 +2,9 @@ name: "AI Commit Summary"
 description: "Generate commit-by-commit summaries using OpenAI"
 
 inputs:
-  github_token:
+  github_token: "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"
     required: true
-  openai_api_key:
+  openai_api_key: "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"
     required: true
   model:
     required: false
