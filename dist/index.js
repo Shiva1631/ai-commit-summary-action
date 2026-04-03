@@ -127,7 +127,7 @@ async function run() {
             {
               role: "system",
               content:
-                "Summarize this git commit in 2-3 bullet points. Include impact and risks."
+                "Give detailed summary compare the previous code and changes code and then provide summary."
             },
             {
               role: "user",
