@@ -55,15 +55,23 @@ async function run() {
       console.log(`Processing commit: ${sha}`);
 
       // Get commit details
-      const commitData = await request({
-        hostname: "api.github.com",
-        path: `/repos/${owner}/${repo}/commits/${sha}`,
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${githubToken}`,
-          "User-Agent": "ai-action"
-        }
-      });
+      const commitsResponse = await request({
+  hostname: "api.github.com",
+  path: `/repos/${owner}/${repo}/pulls/${prNumber}/commits`,
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${githubToken}`,
+    "User-Agent": "ai-action"
+  }
+});
+
+console.log("Commits API response:", JSON.stringify(commitsResponse, null, 2));
+
+if (!Array.isArray(commitsResponse)) {
+  throw new Error("Commits API did not return an array. Likely API error.");
+}
+
+const commits = commitsResponse;
 
       const files = commitData.files || [];
       let diff = files.map((f) => f.patch || "").join("\n");
