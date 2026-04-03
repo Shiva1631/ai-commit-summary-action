@@ -1,7 +1,7 @@
 const https = require("https");
 const fs = require("fs");
 
-// helper to make HTTPS requests
+// ---------- Helper: HTTP Request ----------
 function request(options, data) {
   return new Promise((resolve, reject) => {
     const req = https.request(options, (res) => {
@@ -10,9 +10,8 @@ function request(options, data) {
       res.on("data", (chunk) => (body += chunk));
       res.on("end", () => {
         try {
-          const parsed = JSON.parse(body);
-          resolve(parsed);
-        } catch (e) {
+          resolve(JSON.parse(body));
+        } catch {
           resolve(body);
         }
       });
@@ -20,14 +19,12 @@ function request(options, data) {
 
     req.on("error", reject);
 
-    if (data) {
-      req.write(JSON.stringify(data));
-    }
-
+    if (data) req.write(JSON.stringify(data));
     req.end();
   });
 }
 
+// ---------- Main ----------
 async function run() {
   try {
     const githubToken = process.env.INPUT_GITHUB_TOKEN;
@@ -41,9 +38,10 @@ async function run() {
     const repoFull = process.env.GITHUB_REPOSITORY;
     const [owner, repo] = repoFull.split("/");
 
-    // ✅ robust PR extraction
-    const eventPath = process.env.GITHUB_EVENT_PATH;
-    const eventData = JSON.parse(fs.readFileSync(eventPath, "utf8"));
+    // ✅ Robust PR detection
+    const eventData = JSON.parse(
+      fs.readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")
+    );
 
     if (!eventData.pull_request) {
       console.log("Not a pull request event. Exiting.");
@@ -55,45 +53,49 @@ async function run() {
     console.log(`Repo: ${owner}/${repo}`);
     console.log(`PR Number: ${prNumber}`);
 
-    // 🔹 Fetch commits
+    // ---------- Fetch commits ----------
     const commitsResponse = await request({
       hostname: "api.github.com",
       path: `/repos/${owner}/${repo}/pulls/${prNumber}/commits`,
       method: "GET",
       headers: {
-        Authorization: `Bearer ${githubToken}`,
+        Authorization: `token ${githubToken}`,
         "User-Agent": "ai-action"
       }
     });
 
     if (!Array.isArray(commitsResponse)) {
       console.error("Commits API Error:", commitsResponse);
-      throw new Error("Failed to fetch commits (not an array)");
+      throw new Error("Failed to fetch commits");
     }
 
     const commits = commitsResponse;
 
     console.log(`Total commits: ${commits.length}`);
 
+    // ---------- Loop commits ----------
     for (const commit of commits) {
       const sha = commit.sha;
       const message = commit.commit.message;
 
-      console.log(`\nProcessing commit: ${sha}`);
+      console.log(`\n::group::🔹 Commit ${sha}`);
 
-      // 🔹 Fetch commit diff
+      console.log(`🧾 Message: ${message}`);
+
+      // ---------- Fetch diff ----------
       const commitData = await request({
         hostname: "api.github.com",
         path: `/repos/${owner}/${repo}/commits/${sha}`,
         method: "GET",
         headers: {
-          Authorization: `Bearer ${githubToken}`,
+          Authorization: `token ${githubToken}`,
           "User-Agent": "ai-action"
         }
       });
 
       if (!commitData.files) {
-        console.log(`Skipping commit (no files): ${sha}`);
+        console.log("⚠️ No file changes found");
+        console.log("::endgroup::");
         continue;
       }
 
@@ -103,11 +105,12 @@ async function run() {
         .substring(0, 12000);
 
       if (!diff || diff.length < 20) {
-        console.log(`Skipping small commit: ${sha}`);
+        console.log("⚠️ Skipping small commit");
+        console.log("::endgroup::");
         continue;
       }
 
-      // 🔹 Call OpenAI
+      // ---------- OpenAI ----------
       const aiResponse = await request(
         {
           hostname: "api.openai.com",
@@ -138,16 +141,25 @@ async function run() {
         aiResponse?.choices?.[0]?.message?.content ||
         "No summary generated";
 
-      console.log(`Summary generated for ${sha}`);
+      // ---------- LOG OUTPUT ----------
+      console.log(`🧠 Summary:\n${summary}`);
 
-      // 🔹 Post comment
-      const commentResponse = await request(
+      // ---------- Step Summary UI ----------
+      if (process.env.GITHUB_STEP_SUMMARY) {
+        fs.appendFileSync(
+          process.env.GITHUB_STEP_SUMMARY,
+          `### 🔹 Commit: ${sha}\n\n**Message:** ${message}\n\n${summary}\n\n---\n`
+        );
+      }
+
+      // ---------- PR Comment ----------
+      await request(
         {
           hostname: "api.github.com",
           path: `/repos/${owner}/${repo}/issues/${prNumber}/comments`,
           method: "POST",
           headers: {
-            Authorization: `Bearer ${githubToken}`,
+            Authorization: `token ${githubToken}`,
             "User-Agent": "ai-action",
             "Content-Type": "application/json"
           }
@@ -163,9 +175,7 @@ ${summary}`
         }
       );
 
-      if (commentResponse.message === "Bad credentials") {
-        throw new Error("GitHub token is invalid");
-      }
+      console.log("::endgroup::");
     }
 
     console.log("\n✅ All commits processed successfully");
