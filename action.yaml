@@ -1,0 +1,26 @@
+name: "AI Commit Summary"
+description: "Generate commit-by-commit summaries for pull requests using OpenAI"
+
+author: "Shiva Sharma"
+
+inputs:
+  github_token:
+    description: "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"
+    required: true
+
+  openai_api_key:
+    description: "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"
+    required: true
+
+  model:
+    description: "OpenAI model to use"
+    required: false
+    default: "gpt-4o-mini"
+
+runs:
+  using: "node20"
+  main: "dist/index.js"
+
+branding:
+  icon: "git-commit"
+  color: "blue"
