@@ -1,58 +1,91 @@
-const core = require("@actions/core");
-const github = require("@actions/github");
-const axios = require("axios");
+const https = require("https");
+
+function request(options, data) {
+  return new Promise((resolve, reject) => {
+    const req = https.request(options, (res) => {
+      let body = "";
+      res.on("data", (chunk) => (body += chunk));
+      res.on("end", () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch (e) {
+          resolve(body);
+        }
+      });
+    });
+
+    req.on("error", reject);
+
+    if (data) {
+      req.write(JSON.stringify(data));
+    }
+
+    req.end();
+  });
+}
 
 async function run() {
   try {
-    const githubToken = core.getInput("github_token");
-    const openaiKey = core.getInput("openai_api_key");
-    const model = core.getInput("model") || "gpt-4o-mini";
+    const githubToken = process.env.INPUT_GITHUB_TOKEN;
+    const openaiKey = process.env.INPUT_OPENAI_API_KEY;
+    const model = process.env.INPUT_MODEL || "gpt-4o-mini";
 
-    const octokit = github.getOctokit(githubToken);
-    const context = github.context;
+    const repoFull = process.env.GITHUB_REPOSITORY;
+    const [owner, repo] = repoFull.split("/");
 
-    const prNumber = context.payload.pull_request.number;
-    const { owner, repo } = context.repo;
+    const prNumber = process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\/merge/)[1];
 
-    core.info(`Fetching commits for PR #${prNumber}`);
+    console.log(`Fetching commits for PR #${prNumber}`);
 
     // Get commits
-    const commitsResponse = await octokit.rest.pulls.listCommits({
-      owner,
-      repo,
-      pull_number: prNumber
+    const commits = await request({
+      hostname: "api.github.com",
+      path: `/repos/${owner}/${repo}/pulls/${prNumber}/commits`,
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${githubToken}`,
+        "User-Agent": "ai-action"
+      }
     });
-
-    const commits = commitsResponse.data;
 
     for (const commit of commits) {
       const sha = commit.sha;
       const message = commit.commit.message;
 
-      core.info(`Processing commit: ${sha}`);
+      console.log(`Processing commit: ${sha}`);
 
-      // Get commit diff
-      const commitData = await octokit.rest.repos.getCommit({
-        owner,
-        repo,
-        ref: sha
+      // Get commit details
+      const commitData = await request({
+        hostname: "api.github.com",
+        path: `/repos/${owner}/${repo}/commits/${sha}`,
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${githubToken}`,
+          "User-Agent": "ai-action"
+        }
       });
 
-      const files = commitData.data.files || [];
+      const files = commitData.files || [];
+      let diff = files.map((f) => f.patch || "").join("\n");
 
-      let diff = files.map(f => f.patch || "").join("\n");
-
-      // limit size
       diff = diff.substring(0, 12000);
 
       if (!diff || diff.length < 20) {
-        core.info(`Skipping small commit: ${sha}`);
+        console.log(`Skipping small commit: ${sha}`);
         continue;
       }
 
-      // Call OpenAI
-      const response = await axios.post(
-        "https://api.openai.com/v1/chat/completions",
+      // OpenAI call
+      const aiResponse = await request(
+        {
+          hostname: "api.openai.com",
+          path: "/v1/chat/completions",
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${openaiKey}`,
+            "Content-Type": "application/json"
+          }
+        },
         {
           model,
           messages: [
@@ -66,33 +99,38 @@ async function run() {
               content: diff
             }
           ]
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${openaiKey}`,
-            "Content-Type": "application/json"
-          }
         }
       );
 
-      const summary = response.data.choices[0].message.content;
+      const summary =
+        aiResponse.choices?.[0]?.message?.content || "No summary generated";
 
-      // Post comment
-      await octokit.rest.issues.createComment({
-        owner,
-        repo,
-        issue_number: prNumber,
-        body: `### 🔹 Commit: ${sha}
+      // Post PR comment
+      await request(
+        {
+          hostname: "api.github.com",
+          path: `/repos/${owner}/${repo}/issues/${prNumber}/comments`,
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${githubToken}`,
+            "User-Agent": "ai-action",
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          body: `### 🔹 Commit: ${sha}
 
 🧾 Message:
 ${message}
 
 🧠 AI Summary:
 ${summary}`
-      });
+        }
+      );
     }
-  } catch (error) {
-    core.setFailed(error.message);
+  } catch (err) {
+    console.error("Error:", err.message);
+    process.exit(1);
   }
 }
 
