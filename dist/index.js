@@ -1,7 +1,7 @@
 const https = require("https");
 const fs = require("fs");
 
-// helper to make HTTPS requests
+// ---------- HTTP Helper ----------
 function request(options, data) {
   return new Promise((resolve, reject) => {
     const req = https.request(options, (res) => {
@@ -10,9 +10,8 @@ function request(options, data) {
       res.on("data", (chunk) => (body += chunk));
       res.on("end", () => {
         try {
-          const parsed = JSON.parse(body);
-          resolve(parsed);
-        } catch (e) {
+          resolve(JSON.parse(body));
+        } catch {
           resolve(body);
         }
       });
@@ -20,14 +19,12 @@ function request(options, data) {
 
     req.on("error", reject);
 
-    if (data) {
-      req.write(JSON.stringify(data));
-    }
-
+    if (data) req.write(JSON.stringify(data));
     req.end();
   });
 }
 
+// ---------- MAIN ----------
 async function run() {
   try {
     const githubToken = process.env.INPUT_GITHUB_TOKEN;
@@ -38,76 +35,77 @@ async function run() {
       throw new Error("Missing required inputs");
     }
 
-    const repoFull = process.env.GITHUB_REPOSITORY;
-    const [owner, repo] = repoFull.split("/");
+    const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
 
-    // ✅ robust PR extraction
-    const eventPath = process.env.GITHUB_EVENT_PATH;
-    const eventData = JSON.parse(fs.readFileSync(eventPath, "utf8"));
+    const eventData = JSON.parse(
+      fs.readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")
+    );
 
     if (!eventData.pull_request) {
-      console.log("Not a pull request event. Exiting.");
+      console.log("Not a PR event");
       return;
     }
 
     const prNumber = eventData.pull_request.number;
 
     console.log(`Repo: ${owner}/${repo}`);
-    console.log(`PR Number: ${prNumber}`);
+    console.log(`PR: ${prNumber}`);
 
-    // 🔹 Fetch commits
-    const commitsResponse = await request({
+    // ---------- FETCH COMMITS ----------
+    const commits = await request({
       hostname: "api.github.com",
       path: `/repos/${owner}/${repo}/pulls/${prNumber}/commits`,
       method: "GET",
       headers: {
-        Authorization: `Bearer ${githubToken}`,
+        Authorization: `token ${githubToken}`, // ✅ FIXED
         "User-Agent": "ai-action"
       }
     });
 
-    if (!Array.isArray(commitsResponse)) {
-      console.error("Commits API Error:", commitsResponse);
-      throw new Error("Failed to fetch commits (not an array)");
+    if (!Array.isArray(commits)) {
+      console.error("❌ Commit fetch failed:", commits);
+      throw new Error("Commits API failed");
     }
-
-    const commits = commitsResponse;
 
     console.log(`Total commits: ${commits.length}`);
 
+    // ---------- LOOP ----------
     for (const commit of commits) {
       const sha = commit.sha;
       const message = commit.commit.message;
 
-      console.log(`\nProcessing commit: ${sha}`);
+      console.log(`\n::group::🔹 Commit ${sha}`);
+      console.log(`🧾 Message: ${message}`);
 
-      // 🔹 Fetch commit diff
+      // ---------- DIFF ----------
       const commitData = await request({
         hostname: "api.github.com",
         path: `/repos/${owner}/${repo}/commits/${sha}`,
         method: "GET",
         headers: {
-          Authorization: `Bearer ${githubToken}`,
+          Authorization: `token ${githubToken}`, // ✅ FIXED
           "User-Agent": "ai-action"
         }
       });
 
       if (!commitData.files) {
-        console.log(`Skipping commit (no files): ${sha}`);
+        console.log("⚠️ No file changes");
+        console.log("::endgroup::");
         continue;
       }
 
       let diff = commitData.files
         .map((f) => f.patch || "")
         .join("\n")
-        .substring(0, 12000);
+        .slice(0, 12000);
 
       if (!diff || diff.length < 20) {
-        console.log(`Skipping small commit: ${sha}`);
+        console.log("⚠️ Skipping small commit");
+        console.log("::endgroup::");
         continue;
       }
 
-      // 🔹 Call OpenAI
+      // ---------- OPENAI ----------
       const aiResponse = await request(
         {
           hostname: "api.openai.com",
@@ -134,24 +132,26 @@ async function run() {
         }
       );
 
-      let summary = "No summary generated";
+      // ---------- SUMMARY EXTRACTION ----------
+      let summary = "⚠️ No summary generated";
 
-if (aiResponse?.choices?.[0]?.message?.content) {
-  summary = aiResponse.choices[0].message.content.trim();
-} else if (aiResponse?.output_text) {
-  summary = aiResponse.output_text.trim();
-} else if (aiResponse?.error?.message) {
-  summary = `OpenAI Error: ${aiResponse.error.message}`;
-}
+      if (aiResponse?.choices?.[0]?.message?.content) {
+        summary = aiResponse.choices[0].message.content.trim();
+      } else {
+        console.log("⚠️ OpenAI raw response:", JSON.stringify(aiResponse, null, 2));
+      }
 
-      // 🔹 Post comment
-      const commentResponse = await request(
+      // ---------- LOG SUMMARY ----------
+      console.log(`🧠 Summary:\n${summary}`);
+
+      // ---------- COMMENT ----------
+      const comment = await request(
         {
           hostname: "api.github.com",
           path: `/repos/${owner}/${repo}/issues/${prNumber}/comments`,
           method: "POST",
           headers: {
-            Authorization: `Bearer ${githubToken}`,
+            Authorization: `token ${githubToken}`, // ✅ FIXED
             "User-Agent": "ai-action",
             "Content-Type": "application/json"
           }
@@ -167,12 +167,14 @@ ${summary}`
         }
       );
 
-      if (commentResponse.message === "Bad credentials") {
-        throw new Error("GitHub token is invalid");
+      if (comment?.message) {
+        console.log("⚠️ Comment API response:", comment);
       }
+
+      console.log("::endgroup::");
     }
 
-    console.log("\n✅ All commits processed successfully");
+    console.log("\n✅ Done");
   } catch (err) {
     console.error("❌ Error:", err.message);
     process.exit(1);
