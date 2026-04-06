@@ -24,11 +24,11 @@ function request(options, data) {
   });
 }
 
-// ---------- FALLBACK SUMMARY ----------
+// ---------- FALLBACK ----------
 function fallbackSummary(message, filesCount) {
   return `- ${message}
 - Modified ${filesCount} file(s)
-- Review recommended for potential side effects`;
+- Review recommended`;
 }
 
 // ---------- MAIN ----------
@@ -84,7 +84,7 @@ async function run() {
       console.log(`\n::group::🔹 Commit ${sha}`);
       console.log(`🧾 Message: ${message}`);
 
-      // ---------- GET DIFF ----------
+      // ---------- FETCH DIFF ----------
       const commitData = await request({
         hostname: "api.github.com",
         path: `/repos/${owner}/${repo}/commits/${sha}`,
@@ -102,7 +102,11 @@ async function run() {
       }
 
       const files = commitData.files;
-      let diff = files.map((f) => f.patch || "").join("\n").slice(0, 3000);
+
+      let diff = files
+        .map((f) => f.patch || "")
+        .join("\n")
+        .slice(0, 3000);
 
       if (!diff || diff.length < 20) {
         console.log("Skipping small commit");
@@ -126,7 +130,7 @@ async function run() {
             }
           },
           {
-            inputs: `Summarize this git diff in 2-3 bullet points:
+            inputs: `Summarize this git diff in 2-3 concise bullet points:
 - What changed
 - Why it matters
 - Risks
@@ -136,20 +140,35 @@ ${diff}`
           }
         );
 
-        // ---------- HANDLE RESPONSE ----------
-if (Array.isArray(hfResponse)) {
-  // T5-style: array of strings
-  summary = hfResponse.map(s => s.trim()).join('\n') || fallbackSummary(message, files.length);
-} else if (hfResponse?.generated_text) {
-  // Legacy style
-  summary = hfResponse.generated_text.trim();
-} else if (hfResponse?.error) {
-  console.log('HF error:', hfResponse.error);
-  summary = fallbackSummary(message, files.length);
-} else {
-  console.log('HF unrecognised response:', JSON.stringify(hfResponse).slice(0, 300));
-  summary = fallbackSummary(message, files.length);
-}
+        console.log("HF RAW:", JSON.stringify(hfResponse, null, 2));
+
+        // ---------- SAFE PARSING ----------
+        if (Array.isArray(hfResponse) && hfResponse[0]?.generated_text) {
+          summary = hfResponse[0].generated_text.trim();
+
+        } else if (hfResponse?.generated_text) {
+          summary = hfResponse.generated_text.trim();
+
+        } else if (typeof hfResponse === "string") {
+          console.log("HF returned string:", hfResponse);
+
+        } else if (hfResponse?.error) {
+          console.log("HF error:", hfResponse.error);
+
+        } else {
+          console.log("Unknown HF response:", hfResponse);
+        }
+
+      } catch (e) {
+        console.log("HF request failed:", e.message);
+      }
+
+      // ---------- CLEAN + FALLBACK ----------
+      if (!summary || summary.length < 10) {
+        summary = fallbackSummary(message, files.length);
+      } else {
+        summary = summary.replace(/^.*?bullet points:\s*/i, "").trim();
+      }
 
       // ---------- LOG ----------
       console.log(`🧠 Summary:\n${summary}`);
