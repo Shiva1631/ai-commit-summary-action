@@ -27,53 +27,41 @@ function analyzeCommit(diff, message, files) {
   const points = [];
   const lower = message.toLowerCase();
 
-  let type = "chore";
   let risk = "Low";
 
   if (lower.includes("fix")) {
-    type = "bug fix";
-    points.push("- Bug fix implemented");
+    points.push("• Bug fix implemented");
     risk = "Medium";
   }
 
   if (lower.includes("feat") || lower.includes("add")) {
-    type = "feature";
-    points.push("- New functionality  added");
+    points.push("• New functionality added");
     risk = "Medium";
   }
 
   if (lower.includes("refactor")) {
-    type = "refactor";
-    points.push("- Code refactornd");
+    points.push("• Code refactored");
   }
 
   if (diff.includes("fetch") || diff.includes("axios")) {
-    points.push("- API/data fetching updated");
+    points.push("• API/data fetching updated");
     risk = "Medium";
   }
 
   if (diff.includes("useEffect") || diff.includes("useState")) {
-    points.push("- React logic updated");
+    points.push("• React logic updated");
   }
 
-  if (files.length > 5) {
-    points.push("- Multiple files impacted");
-    risk = "High";
-  }
-
-  if (diff.length > 2000) {
+  if (files.length > 5 || diff.length > 2000) {
     risk = "High";
   }
 
   if (points.length === 0) {
-    points.push("- General improvements");
+    points.push("• General improvements");
   }
-
-  points.push(`- Risk Level: ${risk}`);
 
   return {
     summary: points.join("\n"),
-    type,
     risk
   };
 }
@@ -96,7 +84,7 @@ async function run() {
 
     console.log(`Processing PR #${prNumber}`);
 
-    // ---------- GET COMMITS ----------
+    // ---------- FETCH COMMITS ----------
     const commits = await request({
       hostname: "api.github.com",
       path: `/repos/${owner}/${repo}/pulls/${prNumber}/commits`,
@@ -112,15 +100,16 @@ async function run() {
       throw new Error("Commits API failed");
     }
 
-    let fullSummary = `## 🤖 AI PR Summary\n\n`;
-    let combinedRisk = "Low";
+    let fullSummary = `## 🤖 AI Commit Summary\n\n`;
 
+    let overallRisk = "Low";
+
+    // ---------- LOOP ----------
     for (const commit of commits) {
       const sha = commit.sha;
-      const message = commit.commit.message;
+      const message = commit?.commit?.message || "No commit message";
 
-      console.log(`\n::group::🔹 Commit ${sha}`);
-      console.log(`🧾 Message: ${message}`);
+      console.log(`Processing ${sha} - ${message}`);
 
       const commitData = await request({
         hostname: "api.github.com",
@@ -141,19 +130,24 @@ async function run() {
         .join("\n")
         .slice(0, 3000);
 
-      const { summary, type, risk } = analyzeCommit(diff, message, files);
+      const { summary, risk } = analyzeCommit(diff, message, files);
 
-      if (risk === "High") combinedRisk = "High";
-      else if (risk === "Medium" && combinedRisk !== "High")
-        combinedRisk = "Medium";
+      if (risk === "High") overallRisk = "High";
+      else if (risk === "Medium" && overallRisk !== "High")
+        overallRisk = "Medium";
 
-      fullSummary += `### 🔹 ${message}\n\n`;
+      // ✅ CLEAR COMMIT MESSAGE IN PR
+      fullSummary += `### 🔹 Commit\n`;
+      fullSummary += `**Message:** ${message}\n`;
+      fullSummary += `**SHA:** \`${sha.substring(0, 7)}\`\n\n`;
+
       fullSummary += `${summary}\n\n`;
+      fullSummary += `**Risk:** ${risk}\n\n---\n\n`;
     }
 
-    fullSummary += `---\n\n### ⚠️ Overall Risk: ${combinedRisk}\n`;
+    fullSummary += `### ⚠️ Overall PR Risk: ${overallRisk}\n`;
 
-    // ---------- FIND EXISTING COMMENT ----------
+    // ---------- GET COMMENTS ----------
     const comments = await request({
       hostname: "api.github.com",
       path: `/repos/${owner}/${repo}/issues/${prNumber}/comments`,
@@ -164,9 +158,9 @@ async function run() {
       }
     });
 
-    const existing = comments.find((c) =>
-      c.body.includes("## 🤖 AI PR Summary")
-    );
+    const existing = Array.isArray(comments)
+      ? comments.find((c) => c.body.includes("## 🤖 AI Commit Summary"))
+      : null;
 
     if (existing) {
       // ---------- UPDATE ----------
@@ -184,7 +178,7 @@ async function run() {
         { body: fullSummary }
       );
 
-      console.log("Updated existing comment");
+      console.log("Updated PR comment");
     } else {
       // ---------- CREATE ----------
       await request(
@@ -201,7 +195,7 @@ async function run() {
         { body: fullSummary }
       );
 
-      console.log("Created new summary comment");
+      console.log("Created PR comment");
     }
 
     console.log("✅ Done");
