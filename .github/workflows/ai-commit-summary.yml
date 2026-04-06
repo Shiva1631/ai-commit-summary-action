@@ -1,13 +1,13 @@
 name: AI Commit Summary
 
 on:
-  pull_request:
-    types: [opened, synchronize, opened]
+  pull_request_target:
+    types: [opened, synchronize, reopened]
 
 permissions:
+  contents: read
   pull-requests: read
   issues: write
-  contents: read
 
 jobs:
   summarize:
@@ -16,8 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run AI Commit Summary
+      - name: Run AI Summary
         uses: shiva1631/ai-commit-summary-action@test4
         with:
           github_token: ${{ secrets.SGITHUB_TOKEN }}
-          huggingface_api_key: ${{ secrets.HUGGINGFACE_API_KEY }}
