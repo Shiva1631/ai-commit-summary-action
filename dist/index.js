@@ -1,12 +1,11 @@
 const https = require("https");
 const fs = require("fs");
 
-// ---------- HTTP HELPER ----------
+// ---------- HTTP ----------
 function request(options, data) {
   return new Promise((resolve, reject) => {
     const req = https.request(options, (res) => {
       let body = "";
-
       res.on("data", (chunk) => (body += chunk));
       res.on("end", () => {
         try {
@@ -18,62 +17,72 @@ function request(options, data) {
     });
 
     req.on("error", reject);
-
     if (data) req.write(JSON.stringify(data));
     req.end();
   });
 }
 
-// ---------- SMART SUMMARY ----------
-function generateSummary(diff, message, files) {
+// ---------- ANALYSIS ----------
+function analyzeCommit(diff, message, files) {
   const points = [];
-  const lowerMsg = message.toLowerCase();
+  const lower = message.toLowerCase();
 
-  if (lowerMsg.includes("fix")) {
+  let type = "chore";
+  let risk = "Low";
+
+  if (lower.includes("fix")) {
+    type = "bug fix";
     points.push("- Bug fix implemented");
+    risk = "Medium";
   }
 
-  if (lowerMsg.includes("feat") || lowerMsg.includes("add")) {
-    points.push("- New feature or functionality added");
+  if (lower.includes("feat") || lower.includes("add")) {
+    type = "feature";
+    points.push("- New functionality added");
+    risk = "Medium";
   }
 
-  if (lowerMsg.includes("refactor")) {
-    points.push("- Code refactored for better structure");
+  if (lower.includes("refactor")) {
+    type = "refactor";
+    points.push("- Code refactored");
   }
 
   if (diff.includes("fetch") || diff.includes("axios")) {
-    points.push("- API integration or data fetching updated");
+    points.push("- API/data fetching updated");
+    risk = "Medium";
   }
 
   if (diff.includes("useEffect") || diff.includes("useState")) {
-    points.push("- React state/lifecycle logic updated");
-  }
-
-  if (diff.includes(".css") || diff.includes("style")) {
-    points.push("- UI/Styling changes made");
+    points.push("- React logic updated");
   }
 
   if (files.length > 5) {
-    points.push("- Multiple files updated (broad impact)");
+    points.push("- Multiple files impacted");
+    risk = "High";
+  }
+
+  if (diff.length > 2000) {
+    risk = "High";
   }
 
   if (points.length === 0) {
-    points.push("- General code changes and improvements");
+    points.push("- General improvements");
   }
 
-  points.push("- Review recommended for potential side effects");
+  points.push(`- Risk Level: ${risk}`);
 
-  return points.join("\n");
+  return {
+    summary: points.join("\n"),
+    type,
+    risk
+  };
 }
 
 // ---------- MAIN ----------
 async function run() {
   try {
     const githubToken = process.env.INPUT_GITHUB_TOKEN;
-
-    if (!githubToken) {
-      throw new Error("Missing GitHub token");
-    }
+    if (!githubToken) throw new Error("Missing GitHub token");
 
     const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
 
@@ -81,17 +90,13 @@ async function run() {
       fs.readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")
     );
 
-    if (!eventData.pull_request) {
-      console.log("Not a PR event");
-      return;
-    }
+    if (!eventData.pull_request) return;
 
     const prNumber = eventData.pull_request.number;
 
-    console.log(`Repo: ${owner}/${repo}`);
-    console.log(`PR: ${prNumber}`);
+    console.log(`Processing PR #${prNumber}`);
 
-    // ---------- FETCH COMMITS ----------
+    // ---------- GET COMMITS ----------
     const commits = await request({
       hostname: "api.github.com",
       path: `/repos/${owner}/${repo}/pulls/${prNumber}/commits`,
@@ -107,17 +112,15 @@ async function run() {
       throw new Error("Commits API failed");
     }
 
-    console.log(`Total commits: ${commits.length}`);
+    let fullSummary = `## 🤖 AI PR Summary\n\n`;
+    let combinedRisk = "Low";
 
-    // ---------- LOOP ----------
     for (const commit of commits) {
       const sha = commit.sha;
       const message = commit.commit.message;
 
-      console.log(`\n::group::🔹 Commit ${sha}`);
-      console.log(`🧾 Message: ${message}`);
+      console.log(`Processing ${sha}`);
 
-      // ---------- FETCH DIFF ----------
       const commitData = await request({
         hostname: "api.github.com",
         path: `/repos/${owner}/${repo}/commits/${sha}`,
@@ -128,32 +131,61 @@ async function run() {
         }
       });
 
-      if (!commitData.files) {
-        console.log("No changes found");
-        console.log("::endgroup::");
-        continue;
-      }
+      if (!commitData.files) continue;
 
       const files = commitData.files;
 
-      let diff = files
+      const diff = files
         .map((f) => f.patch || "")
         .join("\n")
         .slice(0, 3000);
 
-      if (!diff || diff.length < 20) {
-        console.log("Skipping small commit");
-        console.log("::endgroup::");
-        continue;
+      const { summary, type, risk } = analyzeCommit(diff, message, files);
+
+      if (risk === "High") combinedRisk = "High";
+      else if (risk === "Medium" && combinedRisk !== "High")
+        combinedRisk = "Medium";
+
+      fullSummary += `### 🔹 ${message}\n\n`;
+      fullSummary += `${summary}\n\n`;
+    }
+
+    fullSummary += `---\n\n### ⚠️ Overall Risk: ${combinedRisk}\n`;
+
+    // ---------- FIND EXISTING COMMENT ----------
+    const comments = await request({
+      hostname: "api.github.com",
+      path: `/repos/${owner}/${repo}/issues/${prNumber}/comments`,
+      method: "GET",
+      headers: {
+        Authorization: `token ${githubToken}`,
+        "User-Agent": "ai-action"
       }
+    });
 
-      // ---------- GENERATE SUMMARY ----------
-      const summary = generateSummary(diff, message, files);
+    const existing = comments.find((c) =>
+      c.body.includes("## 🤖 AI PR Summary")
+    );
 
-      // ---------- LOG ----------
-      console.log(`🧠 Summary:\n${summary}`);
+    if (existing) {
+      // ---------- UPDATE ----------
+      await request(
+        {
+          hostname: "api.github.com",
+          path: `/repos/${owner}/${repo}/issues/comments/${existing.id}`,
+          method: "PATCH",
+          headers: {
+            Authorization: `token ${githubToken}`,
+            "User-Agent": "ai-action",
+            "Content-Type": "application/json"
+          }
+        },
+        { body: fullSummary }
+      );
 
-      // ---------- POST COMMENT ----------
+      console.log("Updated existing comment");
+    } else {
+      // ---------- CREATE ----------
       await request(
         {
           hostname: "api.github.com",
@@ -165,21 +197,13 @@ async function run() {
             "Content-Type": "application/json"
           }
         },
-        {
-          body: `### 🔹 Commit: ${sha}
-
-🧾 Message:
-${message}
-
-🧠 Summary:
-${summary}`
-        }
+        { body: fullSummary }
       );
 
-      console.log("::endgroup::");
+      console.log("Created new summary comment");
     }
 
-    console.log("\n✅ All commits processed successfully");
+    console.log("✅ Done");
   } catch (err) {
     console.error("❌ Error:", err.message);
     process.exit(1);
