@@ -6,6 +6,7 @@ function request(options, data) {
   return new Promise((resolve, reject) => {
     const req = https.request(options, (res) => {
       let body = "";
+
       res.on("data", (chunk) => (body += chunk));
       res.on("end", () => {
         try {
@@ -17,6 +18,7 @@ function request(options, data) {
     });
 
     req.on("error", reject);
+
     if (data) req.write(JSON.stringify(data));
     req.end();
   });
@@ -66,11 +68,84 @@ function analyzeCommit(diff, message, files) {
   };
 }
 
+// ---------- COMMENT HANDLER ----------
+async function postOrUpdateComment(owner, repo, prNumber, githubToken, fullSummary) {
+  const comments = await request({
+    hostname: "api.github.com",
+    path: `/repos/${owner}/${repo}/issues/${prNumber}/comments`,
+    method: "GET",
+    headers: {
+      Authorization: `token ${githubToken}`,
+      "User-Agent": "ai-action"
+    }
+  });
+
+  console.log("Fetched comments:", comments?.length || 0);
+
+  const existing = Array.isArray(comments)
+    ? comments.find((c) => c.body && c.body.includes("## 🤖 AI Commit Summary"))
+    : null;
+
+  let response;
+
+  if (existing) {
+    console.log("Updating existing comment:", existing.id);
+
+    response = await request(
+      {
+        hostname: "api.github.com",
+        path: `/repos/${owner}/${repo}/issues/comments/${existing.id}`,
+        method: "PATCH",
+        headers: {
+          Authorization: `token ${githubToken}`,
+          "User-Agent": "ai-action",
+          "Content-Type": "application/json"
+        }
+      },
+      { body: fullSummary }
+    );
+  } else {
+    console.log("Creating new PR comment");
+
+    response = await request(
+      {
+        hostname: "api.github.com",
+        path: `/repos/${owner}/${repo}/issues/${prNumber}/comments`,
+        method: "POST",
+        headers: {
+          Authorization: `token ${githubToken}`,
+          "User-Agent": "ai-action",
+          "Content-Type": "application/json"
+        }
+      },
+      { body: fullSummary }
+    );
+  }
+
+  console.log("Comment API response:", JSON.stringify(response, null, 2));
+
+  if (!response || response.message) {
+    console.error("❌ Comment failed:", response);
+
+    if (response?.message === "Bad credentials") {
+      throw new Error("Invalid GitHub token");
+    }
+
+    if (response?.message === "Resource not accessible by integration") {
+      throw new Error("Permission issue → use pull_request_target + issues: write");
+    }
+  } else {
+    console.log("✅ Comment posted/updated successfully");
+  }
+}
+
 // ---------- MAIN ----------
 async function run() {
   try {
     const githubToken = process.env.INPUT_GITHUB_TOKEN;
     if (!githubToken) throw new Error("Missing GitHub token");
+
+    console.log("Token present:", !!githubToken);
 
     const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
 
@@ -78,7 +153,10 @@ async function run() {
       fs.readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")
     );
 
-    if (!eventData.pull_request) return;
+    if (!eventData.pull_request) {
+      console.log("Not a PR event");
+      return;
+    }
 
     const prNumber = eventData.pull_request.number;
 
@@ -101,7 +179,6 @@ async function run() {
     }
 
     let fullSummary = `## 🤖 AI Commit Summary\n\n`;
-
     let overallRisk = "Low";
 
     // ---------- LOOP ----------
@@ -136,67 +213,17 @@ async function run() {
       else if (risk === "Medium" && overallRisk !== "High")
         overallRisk = "Medium";
 
-      // ✅ CLEAR COMMIT MESSAGE IN PR
       fullSummary += `### 🔹 Commit\n`;
       fullSummary += `**Message:** ${message}\n`;
       fullSummary += `**SHA:** \`${sha.substring(0, 7)}\`\n\n`;
-
       fullSummary += `${summary}\n\n`;
       fullSummary += `**Risk:** ${risk}\n\n---\n\n`;
     }
 
     fullSummary += `### ⚠️ Overall PR Risk: ${overallRisk}\n`;
 
-    // ---------- GET COMMENTS ----------
-    const comments = await request({
-      hostname: "api.github.com",
-      path: `/repos/${owner}/${repo}/issues/${prNumber}/comments`,
-      method: "GET",
-      headers: {
-        Authorization: `token ${githubToken}`,
-        "User-Agent": "ai-action"
-      }
-    });
-
-    const existing = Array.isArray(comments)
-      ? comments.find((c) => c.body.includes("## 🤖 AI Commit Summary"))
-      : null;
-
-    if (existing) {
-      // ---------- UPDATE ----------
-      await request(
-        {
-          hostname: "api.github.com",
-          path: `/repos/${owner}/${repo}/issues/comments/${existing.id}`,
-          method: "PATCH",
-          headers: {
-            Authorization: `token ${githubToken}`,
-            "User-Agent": "ai-action",
-            "Content-Type": "application/json"
-          }
-        },
-        { body: fullSummary }
-      );
-
-      console.log("Updated PR comment");
-    } else {
-      // ---------- CREATE ----------
-      await request(
-        {
-          hostname: "api.github.com",
-          path: `/repos/${owner}/${repo}/issues/${prNumber}/comments`,
-          method: "POST",
-          headers: {
-            Authorization: `token ${githubToken}`,
-            "User-Agent": "ai-action",
-            "Content-Type": "application/json"
-          }
-        },
-        { body: fullSummary }
-      );
-
-      console.log("Created PR comment");
-    }
+    // ---------- COMMENT ----------
+    await postOrUpdateComment(owner, repo, prNumber, githubToken, fullSummary);
 
     console.log("✅ Done");
   } catch (err) {
