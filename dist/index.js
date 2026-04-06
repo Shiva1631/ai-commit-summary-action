@@ -108,7 +108,7 @@ async function run() {
       // ---------- HUGGING FACE ----------
       const hfResponse = await request(
         {
-          hostname: "api-inference.huggingface.co",
+          hostname: "router.huggingface.co",
           path: `/models/${model}`,
           method: "POST",
           headers: {
