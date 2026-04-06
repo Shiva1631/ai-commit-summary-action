@@ -19,5 +19,5 @@ jobs:
       - name: Run AI Commit Summary
         uses: shiva1631/ai-commit-summary-action@test4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.SGITHUB_TOKEN }}
           huggingface_api_key: ${{ secrets.HUGGINGFACE_API_KEY }}
