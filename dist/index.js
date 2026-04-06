@@ -107,19 +107,19 @@ async function run() {
 
       // ---------- HUGGING FACE ----------
       const hfResponse = await request(
-        {
-          hostname: "router.huggingface.co",
-          path: `/models/${model}`,
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${hfKey}`,
-            "Content-Type": "application/json"
-          }
-        },
-        {
-          inputs: `Summarize this git commit in 2-3 bullet points:\n\n${diff}`
-        }
-      );
+  {
+    hostname: "router.huggingface.co",
+    path: `/models/${model}`,   // ✅ FIXED PATH
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${hfKey}`,
+      "Content-Type": "application/json"
+    }
+  },
+  {
+    inputs: `Summarize this git diff in 2-3 bullet points:\n\n${diff}`
+  }
+);
 
       let summary = "⚠️ No summary generated";
 
