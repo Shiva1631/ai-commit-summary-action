@@ -24,22 +24,55 @@ function request(options, data) {
   });
 }
 
-// ---------- FALLBACK ----------
-function fallbackSummary(message, filesCount) {
-  return `- ${message}
-- Modified ${filesCount} file(s)
-- Review recommended`;
+// ---------- SMART SUMMARY ----------
+function generateSummary(diff, message, files) {
+  const points = [];
+  const lowerMsg = message.toLowerCase();
+
+  if (lowerMsg.includes("fix")) {
+    points.push("- Bug fix implemented");
+  }
+
+  if (lowerMsg.includes("feat") || lowerMsg.includes("add")) {
+    points.push("- New feature or functionality added");
+  }
+
+  if (lowerMsg.includes("refactor")) {
+    points.push("- Code refactored for better structure");
+  }
+
+  if (diff.includes("fetch") || diff.includes("axios")) {
+    points.push("- API integration or data fetching updated");
+  }
+
+  if (diff.includes("useEffect") || diff.includes("useState")) {
+    points.push("- React state/lifecycle logic updated");
+  }
+
+  if (diff.includes(".css") || diff.includes("style")) {
+    points.push("- UI/Styling changes made");
+  }
+
+  if (files.length > 5) {
+    points.push("- Multiple files updated (broad impact)");
+  }
+
+  if (points.length === 0) {
+    points.push("- General code changes and improvements");
+  }
+
+  points.push("- Review recommended for potential side effects");
+
+  return points.join("\n");
 }
 
 // ---------- MAIN ----------
 async function run() {
   try {
     const githubToken = process.env.INPUT_GITHUB_TOKEN;
-    const hfKey = process.env.INPUT_HUGGINGFACE_API_KEY;
-    const model = process.env.INPUT_MODEL || "google/flan-t5-base";
 
-    if (!githubToken || !hfKey) {
-      throw new Error("Missing required inputs");
+    if (!githubToken) {
+      throw new Error("Missing GitHub token");
     }
 
     const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
@@ -114,61 +147,8 @@ async function run() {
         continue;
       }
 
-      // ---------- HUGGING FACE ----------
-      let summary = "";
-
-      try {
-        const hfResponse = await request(
-          {
-            hostname: "router.huggingface.co",
-            path: `/hf-inference/models/${model}`,
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${hfKey}`,
-              "Content-Type": "application/json",
-              "X-Wait-For-Model": "true"
-            }
-          },
-          {
-            inputs: `Summarize this git diff in 2-3 concise bullet points:
-- What changed
-- Why it matters
-- Risks
-
-Diff:
-${diff}`
-          }
-        );
-
-        console.log("HF RAW:", JSON.stringify(hfResponse, null, 2));
-
-        // ---------- SAFE PARSING ----------
-        if (Array.isArray(hfResponse) && hfResponse[0]?.generated_text) {
-          summary = hfResponse[0].generated_text.trim();
-
-        } else if (hfResponse?.generated_text) {
-          summary = hfResponse.generated_text.trim();
-
-        } else if (typeof hfResponse === "string") {
-          console.log("HF returned string:", hfResponse);
-
-        } else if (hfResponse?.error) {
-          console.log("HF error:", hfResponse.error);
-
-        } else {
-          console.log("Unknown HF response:", hfResponse);
-        }
-
-      } catch (e) {
-        console.log("HF request failed:", e.message);
-      }
-
-      // ---------- CLEAN + FALLBACK ----------
-      if (!summary || summary.length < 10) {
-        summary = fallbackSummary(message, files.length);
-      } else {
-        summary = summary.replace(/^.*?bullet points:\s*/i, "").trim();
-      }
+      // ---------- GENERATE SUMMARY ----------
+      const summary = generateSummary(diff, message, files);
 
       // ---------- LOG ----------
       console.log(`🧠 Summary:\n${summary}`);
@@ -191,7 +171,7 @@ ${diff}`
 🧾 Message:
 ${message}
 
-🧠 AI Summary:
+🧠 Summary:
 ${summary}`
         }
       );
