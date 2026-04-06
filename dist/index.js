@@ -137,19 +137,19 @@ ${diff}`
         );
 
         // ---------- HANDLE RESPONSE ----------
-        if (Array.isArray(hfResponse) && hfResponse[0]?.generated_text) {
-          summary = hfResponse[0].generated_text.trim();
-        } else if (hfResponse?.error) {
-          console.log("HF error:", hfResponse.error);
-          summary = fallbackSummary(message, files.length);
-        } else {
-          console.log("HF raw response:", hfResponse);
-          summary = fallbackSummary(message, files.length);
-        }
-      } catch (e) {
-        console.log("HF request failed:", e.message);
-        summary = fallbackSummary(message, files.length);
-      }
+if (Array.isArray(hfResponse)) {
+  // T5-style: array of strings
+  summary = hfResponse.map(s => s.trim()).join('\n') || fallbackSummary(message, files.length);
+} else if (hfResponse?.generated_text) {
+  // Legacy style
+  summary = hfResponse.generated_text.trim();
+} else if (hfResponse?.error) {
+  console.log('HF error:', hfResponse.error);
+  summary = fallbackSummary(message, files.length);
+} else {
+  console.log('HF unrecognised response:', JSON.stringify(hfResponse).slice(0, 300));
+  summary = fallbackSummary(message, files.length);
+}
 
       // ---------- LOG ----------
       console.log(`🧠 Summary:\n${summary}`);
