@@ -134,11 +134,15 @@ async function run() {
         }
       );
 
-      const summary =
-        aiResponse?.choices?.[0]?.message?.content ||
-        "No summary generated";
+      let summary = "No summary generated";
 
-      console.log(`Summary generated for ${sha}`);
+if (aiResponse?.choices?.[0]?.message?.content) {
+  summary = aiResponse.choices[0].message.content.trim();
+} else if (aiResponse?.output_text) {
+  summary = aiResponse.output_text.trim();
+} else if (aiResponse?.error?.message) {
+  summary = `OpenAI Error: ${aiResponse.error.message}`;
+}
 
       // 🔹 Post comment
       const commentResponse = await request(
