@@ -1,21 +1,21 @@
 name: "AI Commit Summary"
-description: "Generate commit-by-commit summaries for pull requests using OpenAI"
+description: "Generate commit-by-commit summaries for pull requests using Hugging Face"
 
 author: "Shiva Sharma"
 
 inputs:
   github_token:
-    description: "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"
+    description: "GitHub token for API access"
     required: true
 
-  inputs:
   huggingface_api_key:
+    description: "Hugging Face API key"
     required: true
 
   model:
-    description: "OpenAI model to use"
+    description: "Model to use"
     required: false
-    default: "gpt-4o-mini"
+    default: "google/flan-t5-large"
 
 runs:
   using: "node20"
