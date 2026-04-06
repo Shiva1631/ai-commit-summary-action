@@ -44,7 +44,7 @@ function analyzeCommit(diff, message, files) {
 
   if (lower.includes("refactor")) {
     type = "refactor";
-    points.push("- Code refactored");
+    points.push("- Code refactornd");
   }
 
   if (diff.includes("fetch") || diff.includes("axios")) {
