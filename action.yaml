@@ -1,0 +1,26 @@
+name: "AI Commit Summary"
+description: "Generate commit-by-commit summaries for pull requests using Hugging Face"
+
+author: "Shiva Sharma"
+
+inputs:
+  github_token:
+    description: "GitHub token for API access"
+    required: true
+
+  huggingface_api_key:
+    description: "Hugging Face API key"
+    required: true
+
+  model:
+    description: "Model to use"
+    required: false
+    default: "google/flan-t5-large"
+
+runs:
+  using: "node20"
+  main: "dist/index.js"
+
+branding:
+  icon: "git-commit"
+  color: "blue"
