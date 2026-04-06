@@ -38,7 +38,7 @@ function analyzeCommit(diff, message, files) {
 
   if (lower.includes("feat") || lower.includes("add")) {
     type = "feature";
-    points.push("- New functionality added");
+    points.push("- New functionality  added");
     risk = "Medium";
   }
 
