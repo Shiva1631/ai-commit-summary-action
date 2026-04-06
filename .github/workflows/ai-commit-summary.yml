@@ -2,7 +2,7 @@ name: AI Commit Summary
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, opened]
 
 permissions:
   pull-requests: read
