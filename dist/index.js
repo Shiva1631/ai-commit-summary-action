@@ -119,7 +119,8 @@ async function run() {
       const sha = commit.sha;
       const message = commit.commit.message;
 
-      console.log(`Processing ${sha}`);
+      console.log(`\n::group::🔹 Commit ${sha}`);
+      console.log(`🧾 Message: ${message}`);
 
       const commitData = await request({
         hostname: "api.github.com",
